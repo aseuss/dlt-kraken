@@ -1,8 +1,13 @@
 use std::fmt::{Display, Formatter};
 use std::mem;
-use std::ops::BitAnd;
 use std::str;
 use crate::dlt::{MessageIter};
+
+macro_rules! is_bit_set {
+    ($value:expr, $bit_mask:expr) => {
+        $value & $bit_mask == $bit_mask
+    }
+}
 
 #[derive(Debug)]
 enum MessageType {
@@ -90,25 +95,25 @@ pub struct ExtendedHeader {
     num_of_args : usize,
     app_id : String,
     context_id : String,
+    length: usize,
 }
 
 const MSG_INFO_VERBOSE_BIT_MASK : u8 = 0x01;
 const MSG_INFO_BIT_MASK: u8 = 0x0E;
 const MSG_TYPE_INFO_BIT_MASK: u8 = 0xF0;
 
-fn is_bit_set<T: BitAnd+Copy>(value: T, bit_mask: T) -> bool
-    where <T as BitAnd>::Output: PartialEq<T> {
-    value & bit_mask == bit_mask
-}
-
 impl ExtendedHeader {
+
+    pub fn len(&self) -> usize {
+        self.length
+    }
 
     pub fn number_of_arguments(&self) -> usize {
         self.num_of_args
     }
 
     pub fn is_verbose(&self) -> bool {
-        is_bit_set(self.msg_info, MSG_INFO_VERBOSE_BIT_MASK)
+        is_bit_set!(self.msg_info, MSG_INFO_VERBOSE_BIT_MASK)
     }
 
     fn msg_type(&self) -> MessageType {
@@ -169,13 +174,13 @@ impl Display for ExtendedHeader {
     fn fmt(&self, f: &mut Formatter<'_>) -> std::fmt::Result {
         let msg_type_info = match self.msg_type() {
             MessageType::Log => self.msg_type_info_log().unwrap().to_string(),
-            MessageType::Reserved => "Reserved".to_owned(),
+            MessageType::Reserved => "".to_string(),
             MessageType::Control => self.msg_type_info_control().unwrap().to_string(),
             MessageType::NetworkTrace => self.msg_type_info_network_trace().unwrap().to_string(),
             MessageType::AppTrace => self.msg_type_info_app_trace().unwrap().to_string(),
         };
-        write!(f, "DltExtendedHeader [ verbose: {}, type: {:?}, type_info: {:?}, argument count: {}, app_id: {}, context_id: {} ]",
-               self.is_verbose(), self.msg_type(), msg_type_info, self.num_of_args, self.app_id, self.context_id)
+        write!(f, "DltExtendedHeader [ verbose: {}, type: {:?}, type_info: {:?}, argument count: {}, app_id: {}, context_id: {}, hdr_size: {} ]",
+               self.is_verbose(), self.msg_type(), msg_type_info, self.num_of_args, self.app_id, self.context_id, self.length )
     }
 }
 
@@ -189,35 +194,40 @@ const HTYP_VERSION_BIT_MASK: u8 = 0xE0;
 pub struct StandardHeader {
     htyp : u8,
     counter : usize,
-    length : usize,
+    msg_length: usize,
     ecu_id : Option<String>,
     session_id : Option<u32>,
     timestamp : Option<u32>,
+    length: usize,
 }
 
 impl StandardHeader {
     pub fn has_extended_header(&self) -> bool {
-        self.htyp & HTYP_EXTENDED_HEADER_BIT_MASK == HTYP_EXTENDED_HEADER_BIT_MASK
+        is_bit_set!(self.htyp, HTYP_EXTENDED_HEADER_BIT_MASK)
     }
 
     pub fn has_session_id(&self) -> bool {
-        self.htyp & HTYP_SESSION_ID_BIT_MASK == HTYP_SESSION_ID_BIT_MASK
+        is_bit_set!(self.htyp, HTYP_SESSION_ID_BIT_MASK)
     }
 
     pub fn has_ecu_id(&self) -> bool {
-        self.htyp & HTYP_ECU_ID_BIT_MASK == HTYP_ECU_ID_BIT_MASK
+        is_bit_set!(self.htyp, HTYP_ECU_ID_BIT_MASK)
     }
 
     pub fn is_big_endian(&self) -> bool {
-        self.htyp & HTYP_MSB_FIRST_BIT_MASK == HTYP_MSB_FIRST_BIT_MASK
+        is_bit_set!(self.htyp, HTYP_MSB_FIRST_BIT_MASK)
     }
 
     pub fn has_timestamp(&self) -> bool {
-        self.htyp & HTYP_TIMESTAMP_BIT_MASK == HTYP_TIMESTAMP_BIT_MASK
+        is_bit_set!(self.htyp, HTYP_TIMESTAMP_BIT_MASK)
     }
 
     pub fn version(&self) -> u8 {
         (self.htyp & HTYP_VERSION_BIT_MASK) >> 5
+    }
+
+    pub fn msg_len(&self) -> usize {
+        self.msg_length
     }
 
     pub fn len(&self) -> usize {
@@ -227,21 +237,26 @@ impl StandardHeader {
 
 impl Display for StandardHeader {
     fn fmt(&self, f: &mut Formatter<'_>) -> std::fmt::Result {
-        write!(f, "DltStandardHeader [ htyp: 0x{:02X}, counter: {}, length: {}, ecu_id: {:?}, session_id: {:?}, timestamp: {:?} ]", self.htyp, self.counter, self.length, self.ecu_id, self.session_id, self.timestamp)
+        write!(f, "DltStandardHeader [ htyp: 0x{:02X}, counter: {}, version: {}, big_endian: {}, length: {}, ecu_id: {:?}, session_id: {:?}, timestamp: {:?} , hdr_size: {} ]",
+               self.htyp, self.counter, self.version(), self.is_big_endian(), self.msg_length, self.ecu_id, self.session_id, self.timestamp, self.length )
     }
 }
 
 const DLT_PATTERN_SIZE : usize = 4;
 const ECU_NAME_SIZE : usize = 4;
+const DLT_STORAGE_START_PATTERN : [u8;4] = [0x44, 0x4C, 0x54, 0x01];
 
 pub fn read_storage_header(iter: &mut MessageIter) -> StorageHeader {
     let mut read_offset = iter.index;
-    println!("index read storage {}", read_offset);
 
     let mut read_to = read_offset + DLT_PATTERN_SIZE;
     let dlt_pattern = &iter.data[read_offset..read_to];
-    println!("pattern {:?}", dlt_pattern);
     read_offset = read_to;
+    if DLT_STORAGE_START_PATTERN != dlt_pattern {
+        // TODO: imrpve error handling
+        println!("ERROR: DLT pattern not found when expected");
+        panic!();
+    }
 
     read_to = read_offset + mem::size_of::<u32>();
     let time_sec = u32::from_be_bytes(*&iter.data[read_offset..read_to].try_into().unwrap());
@@ -268,6 +283,7 @@ const ECU_ID_SIZE : usize = 4;
 
 pub fn read_standard_header(iter: &mut MessageIter) -> StandardHeader {
     let mut read_offset = iter.index;
+    let start_index = iter.index;
 
     let htyp = *&iter.data[read_offset] as u8;
     read_offset = read_offset + mem::size_of::<u8>();
@@ -282,35 +298,12 @@ pub fn read_standard_header(iter: &mut MessageIter) -> StandardHeader {
     let mut standard_header = StandardHeader {
         htyp: htyp,
         counter: counter,
-        length: length,
+        msg_length: length,
         ecu_id: None,
         session_id: None,
         timestamp: None,
+        length: 0,
     };
-
-    if standard_header.has_extended_header() {
-        println!("has extended header");
-    }
-
-    if standard_header.is_big_endian() {
-        println!("msb first, big endian");
-    } else {
-        println!("lsb first, little endian");
-    }
-
-    if standard_header.has_ecu_id() {
-        println!("has ecu id");
-    }
-
-    if standard_header.has_session_id() {
-        println!("has session id");
-    }
-
-    if standard_header.has_timestamp() {
-        println!("has time stamp");
-    }
-
-    println!("htyp version: {}", standard_header.version());
 
     standard_header.ecu_id = match standard_header.has_ecu_id() {
         true => {
@@ -343,7 +336,9 @@ pub fn read_standard_header(iter: &mut MessageIter) -> StandardHeader {
         false => None,
     };
 
-    iter.index = read_offset;
+    let end_index = read_offset;
+    iter.index = end_index;
+    standard_header.length = end_index - start_index;
     standard_header
 }
 
@@ -352,11 +347,12 @@ const CONTEXT_ID_SIZE : usize = 4;
 
 pub fn read_extended_header(iter: &mut MessageIter) -> ExtendedHeader {
     let mut read_offset = iter.index;
+    let start_index = iter.index;
 
     let msg_info = *&iter.data[read_offset] as u8;
     read_offset = read_offset + mem::size_of::<u8>();
 
-    let num_arguments = if is_bit_set(msg_info, MSG_INFO_VERBOSE_BIT_MASK) {
+    let num_arguments = if is_bit_set!(msg_info, MSG_INFO_VERBOSE_BIT_MASK) {
         *&iter.data[read_offset] as usize
     } else {
         0
@@ -371,12 +367,14 @@ pub fn read_extended_header(iter: &mut MessageIter) -> ExtendedHeader {
     let context_id = str::from_utf8(&iter.data[read_offset..read_to]).unwrap().trim_matches(char::from(0)).to_owned();
     read_offset = read_to;
 
-    iter.index = read_offset;
+    let end_index = read_offset;
+    iter.index = end_index;
 
     ExtendedHeader {
         msg_info: msg_info,
         num_of_args: num_arguments,
         app_id: app_id,
         context_id: context_id,
+        length: end_index - start_index,
     }
 }

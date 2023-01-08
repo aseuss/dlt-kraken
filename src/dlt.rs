@@ -73,7 +73,7 @@ impl<'a> MessageIter<'a> {
         } else {
             println!("no extended header, skip parsing")
         }
-        self.index = start_index + standard_header.len();
+        self.index = start_index + standard_header.msg_len();
     }
 }
 
