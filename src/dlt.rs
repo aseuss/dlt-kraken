@@ -61,17 +61,40 @@ impl<'a> MessageIter<'a> {
         if standard_header.has_extended_header() {
             let ext_header = read_extended_header(self);
             println!("{}", ext_header);
+
+            let payload_size = standard_header.msg_len() - standard_header.len() - ext_header.len();
+
             if ext_header.is_verbose() {
-                let payload = Payload::new(self.data, self.index, standard_header.is_big_endian(), ext_header.number_of_arguments());
+                let payload = Payload::new_verbose(
+                    self.data,
+                    self.index,
+                    payload_size,
+                    standard_header.is_big_endian(),
+                    ext_header.number_of_arguments(),
+                );
 
                 for arg in &payload {
                     println!("{:?}", arg);
                 }
             } else {
-                println!("WARN: non-verbose messages not supported.")
+                let payload = Payload::new_non_verbose(
+                    self.data,
+                    self.index,
+                    payload_size,
+                    standard_header.is_big_endian(),
+                );
+                println!("{:?}", payload.read_non_verbose());
             }
         } else {
-            println!("no extended header, skip parsing")
+            let payload_size = standard_header.msg_len() - standard_header.len();
+
+            let payload = Payload::new_non_verbose(
+                self.data,
+                self.index,
+                payload_size,
+                standard_header.is_big_endian(),
+            );
+            println!("{:x?}", payload.read_non_verbose());
         }
         self.index = start_index + standard_header.msg_len();
     }

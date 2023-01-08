@@ -180,26 +180,47 @@ pub enum Value<'a> {
     Float64(f64),
     String(&'a str),
     TraceData(&'a str),
+    NonVerbose(u32, &'a [u8]),
 }
 
 pub struct Payload<'a> {
     data : &'a [u8],
     index: usize,
+    payload_size: usize,
     count: usize,
     is_big_endian : bool,
+    is_verbose: bool,
 }
 
-impl Payload<'_> {
+impl<'a> Payload<'_> {
 
-    pub fn new<'a>(data: &'a [u8], index: usize, is_big_endian: bool, count: usize) -> Payload<'a> {
-        Payload{data, index, count, is_big_endian }
+    pub fn new_verbose(data: &'a [u8], index: usize, payload_size: usize, is_big_endian: bool, count: usize) -> Payload<'a> {
+        Payload { data, index, payload_size, count, is_big_endian, is_verbose: true }
     }
 
-    pub fn iter<'a>(&'a self) -> PayloadIter<'a> {
+    pub fn new_non_verbose(data: &'a [u8], index: usize, payload_size: usize, is_big_endian: bool) -> Payload<'a> {
+        Payload { data, index, payload_size, count: 0, is_big_endian, is_verbose: false }
+    }
+
+    pub fn read_non_verbose(&'a self) -> Value <'a> {
+        let mut read_to = self.index + SIZE_MSG_ID;
+        let converter = if self.is_big_endian { ByteConverter::FromBigEndian } else { ByteConverter::FromLittleEndian };
+        let message_id = converter.u32_from_bytes(self.data[self.index .. read_to].try_into().unwrap());
+        let index = read_to;
+
+        read_to = index + self.payload_size - SIZE_MSG_ID;
+        let payload = &self.data[index..read_to];
+
+        Value::NonVerbose(message_id, payload)
+    }
+
+    pub fn iter(&'a self) -> PayloadIter<'a> {
         PayloadIter {
             data : self.data,
             index : self.index,
+            payload_size: self.payload_size,
             count : self.count,
+            is_verbose: self.is_verbose,
             converter : if self.is_big_endian { ByteConverter::FromBigEndian } else { ByteConverter::FromLittleEndian }
         }
     }
@@ -208,7 +229,9 @@ impl Payload<'_> {
 pub struct PayloadIter<'a> {
     data: &'a [u8],
     index: usize,
+    payload_size: usize,
     count: usize,
+    is_verbose: bool,
     converter: ByteConverter,
 }
 
@@ -218,7 +241,7 @@ impl<'a> Iterator for PayloadIter<'a> {
     fn next(&mut self) -> Option<Self::Item> {
         if self.count > 0 {
             self.count -= 1;
-            self.read_argument()
+            self.read_verbose_argument()
         } else {
             return None
         }
@@ -234,9 +257,11 @@ impl<'a> IntoIterator for &'a Payload<'a> {
     }
 }
 
+const SIZE_MSG_ID: usize = mem::size_of::<u32>();
+
 impl<'a> PayloadIter<'a> {
 
-    fn read_argument(&mut self) -> Option<Value <'a>> {
+    fn read_verbose_argument(&mut self) -> Option<Value <'a>> {
         let read_to = self.index + mem::size_of::<u32>();
         let type_info = self.converter.u32_from_bytes(self.data[self.index .. read_to].try_into().unwrap());
         self.index = read_to;
