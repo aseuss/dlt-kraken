@@ -164,7 +164,7 @@ impl From<u32> for Type {
 }
 
 #[derive(Debug)]
-pub enum Value<'a> {
+pub enum Value<'d> {
     Bool(bool),
     SInt8(i8),
     SInt16(i16),
@@ -178,13 +178,13 @@ pub enum Value<'a> {
     UInt128(u128),
     Float32(f32),
     Float64(f64),
-    String(&'a str),
-    TraceData(&'a str),
-    NonVerbose(u32, &'a [u8]),
+    String(&'d str),
+    TraceData(&'d str),
+    NonVerbose(u32, &'d [u8]),
 }
 
-pub struct Payload<'a> {
-    data : &'a [u8],
+pub struct Payload<'d> {
+    data : &'d [u8],
     index: usize,
     payload_size: usize,
     count: usize,
@@ -192,17 +192,17 @@ pub struct Payload<'a> {
     is_verbose: bool,
 }
 
-impl<'a> Payload<'_> {
+impl<'p,'d:'p> Payload<'d> {
 
-    pub fn new_verbose(data: &'a [u8], index: usize, payload_size: usize, is_big_endian: bool, count: usize) -> Payload<'a> {
+    pub fn new_verbose(data: &'d [u8], index: usize, payload_size: usize, is_big_endian: bool, count: usize) -> Payload<'d> {
         Payload { data, index, payload_size, count, is_big_endian, is_verbose: true }
     }
 
-    pub fn new_non_verbose(data: &'a [u8], index: usize, payload_size: usize, is_big_endian: bool) -> Payload<'a> {
+    pub fn new_non_verbose<'b>(data: &'d [u8], index: usize, payload_size: usize, is_big_endian: bool) -> Payload<'d> {
         Payload { data, index, payload_size, count: 0, is_big_endian, is_verbose: false }
     }
 
-    pub fn read_non_verbose(&'a self) -> Value <'a> {
+    pub fn read_non_verbose(&'p self) -> Value <'d> {
         let mut read_to = self.index + SIZE_MSG_ID;
         let converter = if self.is_big_endian { ByteConverter::FromBigEndian } else { ByteConverter::FromLittleEndian };
         let message_id = converter.u32_from_bytes(self.data[self.index .. read_to].try_into().unwrap());
@@ -214,7 +214,7 @@ impl<'a> Payload<'_> {
         Value::NonVerbose(message_id, payload)
     }
 
-    pub fn iter(&'a self) -> PayloadIter<'a> {
+    pub fn iter(&'p self) -> PayloadIter<'d> {
         PayloadIter {
             data : self.data,
             index : self.index,
@@ -226,8 +226,8 @@ impl<'a> Payload<'_> {
     }
 }
 
-pub struct PayloadIter<'a> {
-    data: &'a [u8],
+pub struct PayloadIter<'d> {
+    data: &'d [u8],
     index: usize,
     payload_size: usize,
     count: usize,
@@ -235,8 +235,8 @@ pub struct PayloadIter<'a> {
     converter: ByteConverter,
 }
 
-impl<'a> Iterator for PayloadIter<'a> {
-    type Item = Value<'a>;
+impl<'d> Iterator for PayloadIter<'d> {
+    type Item = Value<'d>;
 
     fn next(&mut self) -> Option<Self::Item> {
         if self.count > 0 {
@@ -248,9 +248,9 @@ impl<'a> Iterator for PayloadIter<'a> {
     }
 }
 
-impl<'a> IntoIterator for &'a Payload<'a> {
-    type Item = Value<'a>;
-    type IntoIter = PayloadIter<'a>;
+impl<'p,'d:'p> IntoIterator for &'p Payload<'d> {
+    type Item = Value<'d>;
+    type IntoIter = PayloadIter<'d>;
 
     fn into_iter(self) -> Self::IntoIter {
         self.iter()
@@ -259,9 +259,9 @@ impl<'a> IntoIterator for &'a Payload<'a> {
 
 const SIZE_MSG_ID: usize = mem::size_of::<u32>();
 
-impl<'a> PayloadIter<'a> {
+impl<'d> PayloadIter<'d> {
 
-    fn read_verbose_argument(&mut self) -> Option<Value <'a>> {
+    fn read_verbose_argument(&mut self) -> Option<Value <'d>> {
         let read_to = self.index + mem::size_of::<u32>();
         let type_info = self.converter.u32_from_bytes(self.data[self.index .. read_to].try_into().unwrap());
         self.index = read_to;
@@ -281,7 +281,7 @@ impl<'a> PayloadIter<'a> {
         }
     }
 
-    fn read_bool(&mut self, type_info: &TypeInfo) -> Option<Value<'a>> {
+    fn read_bool(&mut self, type_info: &TypeInfo) -> Option<Value<'d>> {
         match type_info.length {
             TypeLength::Bits8 => {
                 let read_to = self.index + mem::size_of::<u8>();
@@ -293,7 +293,7 @@ impl<'a> PayloadIter<'a> {
         }
     }
 
-    fn read_signed(&mut self, type_info: &TypeInfo) -> Option<Value<'a>> {
+    fn read_signed(&mut self, type_info: &TypeInfo) -> Option<Value<'d>> {
         match type_info.length {
             TypeLength::Bits8 => {
                 let read_to = self.index + mem::size_of::<i8>();
@@ -329,7 +329,7 @@ impl<'a> PayloadIter<'a> {
         }
     }
 
-    fn read_unsigned(&mut self, type_info: &TypeInfo) -> Option<Value<'a>> {
+    fn read_unsigned(&mut self, type_info: &TypeInfo) -> Option<Value<'d>> {
         match type_info.length {
             TypeLength::Bits8 => {
                 let read_to = self.index + mem::size_of::<u8>();
@@ -365,43 +365,43 @@ impl<'a> PayloadIter<'a> {
         }
     }
 
-    fn read_float(&self, type_info: &TypeInfo) -> Option<Value<'a>> {
+    fn read_float(&self, type_info: &TypeInfo) -> Option<Value<'d>> {
         None
     }
 
-    fn read_array(&self, _type_info: &TypeInfo) -> Option<Value<'a>> {
+    fn read_array(&self, _type_info: &TypeInfo) -> Option<Value<'d>> {
         None
     }
 
-    fn read_string(&mut self, type_info: &TypeInfo) -> Option<Value<'a>> {
+    fn read_string(&mut self, type_info: &TypeInfo) -> Option<Value<'d>> {
         let mut read_to = self.index + mem::size_of::<u16>();
         let str_len = self.converter.u16_from_bytes(*&self.data[self.index .. read_to].try_into().unwrap()) as usize;
         self.index = read_to;
 
         read_to = read_to + str_len;
-        let string: &'a str = str::from_utf8(&self.data[self.index .. read_to]).unwrap().trim_matches(char::from(0));
+        let string: &'d str = str::from_utf8(&self.data[self.index .. read_to]).unwrap().trim_matches(char::from(0));
         self.index = read_to;
 
         Some(Value::String(string))
     }
 
-    fn read_rawdata(&mut self, type_info: &TypeInfo) -> Option<Value<'a>> {
+    fn read_rawdata(&mut self, type_info: &TypeInfo) -> Option<Value<'d>> {
         None
     }
 
-    fn read_trace_info(&mut self, type_info: &TypeInfo) -> Option<Value<'a>> {
+    fn read_trace_info(&mut self, type_info: &TypeInfo) -> Option<Value<'d>> {
         let mut read_to = self.index + mem::size_of::<u16>();
         let str_len = self.converter.u16_from_bytes(*&self.data[self.index .. read_to].try_into().unwrap()) as usize;
         self.index = read_to;
 
         read_to = read_to + str_len;
-        let trace_data: &'a str = str::from_utf8(&self.data[self.index .. read_to]).unwrap().trim_matches(char::from(0));
+        let trace_data: &'d str = str::from_utf8(&self.data[self.index .. read_to]).unwrap().trim_matches(char::from(0));
         self.index = read_to;
 
         Some(Value::TraceData(trace_data))
     }
 
-    fn read_struct(&mut self, _type_info: &TypeInfo) -> Option<Value<'a>> {
+    fn read_struct(&mut self, _type_info: &TypeInfo) -> Option<Value<'d>> {
         None
     }
 }
