@@ -1,7 +1,7 @@
 use std::fmt::{Display, Formatter};
 use std::mem;
 use std::str;
-use crate::dlt::{MessageIter};
+use crate::dlt::{TraceDataIter};
 
 macro_rules! is_bit_set {
     ($value:expr, $bit_mask:expr) => {
@@ -78,6 +78,7 @@ impl Display for MessageTypeInfoControl {
     }
 }
 
+#[derive(Debug)]
 pub struct StorageHeader {
     timestamp_sec : u32,
     timestamp_usec : u32,
@@ -90,6 +91,7 @@ impl Display for StorageHeader {
     }
 }
 
+#[derive(Debug)]
 pub struct ExtendedHeader {
     msg_info : u8,
     num_of_args : usize,
@@ -191,6 +193,7 @@ const HTYP_SESSION_ID_BIT_MASK: u8 = 0x08;
 const HTYP_TIMESTAMP_BIT_MASK: u8 = 0x10;
 const HTYP_VERSION_BIT_MASK: u8 = 0xE0;
 
+#[derive(Debug)]
 pub struct StandardHeader {
     htyp : u8,
     counter : usize,
@@ -246,7 +249,7 @@ const DLT_PATTERN_SIZE : usize = 4;
 const ECU_NAME_SIZE : usize = 4;
 const DLT_STORAGE_START_PATTERN : [u8;4] = [0x44, 0x4C, 0x54, 0x01];
 
-pub fn read_storage_header(iter: &mut MessageIter) -> StorageHeader {
+pub fn read_storage_header(iter: &mut TraceDataIter) -> StorageHeader {
     let mut read_offset = iter.index;
 
     let mut read_to = read_offset + DLT_PATTERN_SIZE;
@@ -281,7 +284,7 @@ pub fn read_storage_header(iter: &mut MessageIter) -> StorageHeader {
 
 const ECU_ID_SIZE : usize = 4;
 
-pub fn read_standard_header(iter: &mut MessageIter) -> StandardHeader {
+pub fn read_standard_header(iter: &mut TraceDataIter) -> StandardHeader {
     let mut read_offset = iter.index;
     let start_index = iter.index;
 
@@ -345,7 +348,7 @@ pub fn read_standard_header(iter: &mut MessageIter) -> StandardHeader {
 const APP_ID_SIZE : usize = 4;
 const CONTEXT_ID_SIZE : usize = 4;
 
-pub fn read_extended_header(iter: &mut MessageIter) -> ExtendedHeader {
+pub fn read_extended_header(iter: &mut TraceDataIter) -> ExtendedHeader {
     let mut read_offset = iter.index;
     let start_index = iter.index;
 

@@ -1,103 +1,117 @@
 use std::fs::File;
 use memmap::MmapOptions;
-use crate::dlt::headers::{read_extended_header, read_standard_header, read_storage_header};
-use crate::dlt::payload::Payload;
+use crate::dlt::headers::{ExtendedHeader, read_extended_header, read_standard_header, read_storage_header, StandardHeader, StorageHeader};
+use crate::dlt::payload::{Payload, Value};
 
 mod headers;
 mod payload;
 
-pub struct Message<'a> {
-    data : &'a [u8],
+pub struct TraceData<'d> {
+    data : &'d [u8],
     index: usize,
 }
 
-impl Message<'_> {
-    fn new<'a>(data: &'a [u8], index: usize) -> Message<'a> {
-        Message {data, index }
+impl<'t,'d:'t> TraceData<'d> {
+    fn new(data: &'d [u8], index: usize) -> TraceData<'d> {
+        TraceData {data, index }
     }
 
-    fn iter<'a>(&'a self) -> MessageIter<'a> {
-        MessageIter { data: self.data, index: self.index }
+    fn iter(&'t self) -> TraceDataIter<'d> {
+        TraceDataIter { data: self.data, index: self.index }
     }
 }
 
-impl<'a> Iterator for MessageIter<'a> {
-    type Item = Message<'a>;
+impl<'d> Iterator for TraceDataIter<'d> {
+    type Item = Message<'d>;
 
     fn next(&mut self) -> Option<Self::Item> {
         if self.index < self.data.len() {
-            self.read_message();
-            Some(Message { data: self.data, index: self.index })
+            Some(self.read_message())
         } else {
             None
         }
     }
 }
 
-impl<'a> IntoIterator for &'a Message<'a> {
-    type Item = Message<'a>;
-    type IntoIter = MessageIter<'a>;
+impl<'a,'d:'a> IntoIterator for &'a TraceData<'d> {
+    type Item = Message<'d>;
+    type IntoIter = TraceDataIter<'d>;
 
     fn into_iter(self) -> Self::IntoIter {
         self.iter()
     }
 }
 
-pub struct MessageIter<'a> {
-    data: &'a [u8],
+pub struct TraceDataIter<'d> {
+    data: &'d [u8],
     index: usize,
 }
 
-impl<'a> MessageIter<'a> {
-    fn read_message(&mut self) {
+impl<'d> TraceDataIter<'d> {
+    fn read_message(&mut self) -> Message<'d> {
         let storage_header = read_storage_header(self);
-        println!("{}", storage_header);
         let start_index = self.index;
-        println!("start_index {}", start_index);
 
         let standard_header = read_standard_header(self);
-        println!("{}, index {} size {}", standard_header, self.index, self.data.len());
 
-        if standard_header.has_extended_header() {
+        let mut message = Message {
+            storage_header,
+            standard_header,
+            extended_header: None,
+            payload: vec![],
+        };
+
+        if message.standard_header.has_extended_header() {
             let ext_header = read_extended_header(self);
-            println!("{}", ext_header);
+            message.extended_header = Some(ext_header);
 
-            let payload_size = standard_header.msg_len() - standard_header.len() - ext_header.len();
+            let payload_size = message.standard_header.msg_len() - message.standard_header.len() - message.extended_header.as_ref().unwrap().len();
 
-            if ext_header.is_verbose() {
+            if message.extended_header.as_ref().unwrap().is_verbose() {
                 let payload = Payload::new_verbose(
                     self.data,
                     self.index,
                     payload_size,
-                    standard_header.is_big_endian(),
-                    ext_header.number_of_arguments(),
+                    message.standard_header.is_big_endian(),
+                    message.extended_header.as_ref().unwrap().number_of_arguments(),
                 );
 
                 for arg in &payload {
-                    println!("{:?}", arg);
+                    message.payload.push(arg);
                 }
             } else {
                 let payload = Payload::new_non_verbose(
                     self.data,
                     self.index,
                     payload_size,
-                    standard_header.is_big_endian(),
+                    message.standard_header.is_big_endian(),
                 );
-                println!("{:?}", payload.read_non_verbose());
+                let value = payload.read_non_verbose();
+                message.payload.push(value);
             }
         } else {
-            let payload_size = standard_header.msg_len() - standard_header.len();
+            let payload_size = message.standard_header.msg_len() - message.standard_header.len();
 
             let payload = Payload::new_non_verbose(
                 self.data,
                 self.index,
                 payload_size,
-                standard_header.is_big_endian(),
+                message.standard_header.is_big_endian(),
             );
-            println!("{:x?}", payload.read_non_verbose());
+            let value = payload.read_non_verbose();
+            message.payload.push(value);
         }
-        self.index = start_index + standard_header.msg_len();
+        self.index = start_index + message.standard_header.msg_len();
+        message
     }
+}
+
+#[derive(Debug)]
+pub struct Message<'d> {
+    storage_header: StorageHeader,
+    standard_header: StandardHeader,
+    extended_header: Option<ExtendedHeader>,
+    payload: Vec<Value<'d>>,
 }
 
 pub fn run_dlt() {
@@ -106,8 +120,8 @@ pub fn run_dlt() {
     let file= File::open(path).unwrap();
     let mmap = unsafe { MmapOptions::new().map(&file).unwrap() };
 
-    let message = Message::new(&mmap, 0);
+    let message = TraceData::new(&mmap, 0);
     for msg in &message {
-        println!("new message at {}", msg.index);
+        println!("new message {:?}", msg);
     }
 }
