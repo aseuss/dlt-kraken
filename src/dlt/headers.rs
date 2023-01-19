@@ -85,6 +85,12 @@ pub struct StorageHeader {
     ecu : String,
 }
 
+impl StorageHeader {
+    pub fn ecu_id(&self) -> &String {
+        &self.ecu
+    }
+}
+
 impl Display for StorageHeader {
     fn fmt(&self, f: &mut Formatter<'_>) -> std::fmt::Result {
         write!(f, "DltStorageHeader [ sec: {}, usec: {}, ecu: {} ]", self.timestamp_sec, self.timestamp_usec, self.ecu)
@@ -116,6 +122,14 @@ impl ExtendedHeader {
 
     pub fn is_verbose(&self) -> bool {
         is_bit_set!(self.msg_info, MSG_INFO_VERBOSE_BIT_MASK)
+    }
+
+    pub fn app_id(&self) -> &String {
+        &self.app_id
+    }
+
+    pub fn context_id(&self) -> &String {
+        &self.context_id
     }
 
     fn msg_type(&self) -> MessageType {
