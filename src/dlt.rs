@@ -1,10 +1,15 @@
+use std::collections::{HashMap};
 use std::fs::File;
 use memmap::MmapOptions;
+use regex::RegexSet;
+use crate::dlt::filter::{FilterId, FilterType};
+use crate::dlt::filter::FilterId::{AppId, ContextId, EcuId};
 use crate::dlt::headers::{ExtendedHeader, read_extended_header, read_standard_header, read_storage_header, StandardHeader, StorageHeader};
 use crate::dlt::payload::{Payload, Value};
 
 mod headers;
 mod payload;
+mod filter;
 
 pub struct TraceData<'d> {
     data : &'d [u8],
@@ -120,8 +125,77 @@ pub fn run_dlt() {
     let file= File::open(path).unwrap();
     let mmap = unsafe { MmapOptions::new().map(&file).unwrap() };
 
+    let mut filters = HashMap::new();
+    filters.insert(FilterId::EcuId, FilterType::EcuId("ECU1".to_string()));
+    filters.insert(FilterId::AppId, FilterType::AppId("APP1".to_string()));
+    filters.insert(FilterId::ContextId, FilterType::ContextId("CON1".to_string()));
+    let patterns = RegexSet::new(&["short", "long"]).unwrap();
+    filters.insert(FilterId::Patterns, FilterType::Patterns(patterns));
+
     let message = TraceData::new(&mmap, 0);
-    for msg in &message {
-        println!("new message {:?}", msg);
+
+    let filtered_messages: Vec<Message> = message.iter()
+        .filter(|msg| filter_ecu_id(&filters, msg))
+        .filter(|msg| filter_app_id(&filters, msg))
+        .filter(|msg| filter_context_id(&filters, msg))
+        .filter(|msg| filter_patterns(&filters, msg))
+        .collect();
+    for msg in &filtered_messages {
+        println!("{:?}", msg);
+    }
+}
+
+fn filter_ecu_id(filters: &HashMap<FilterId, FilterType>, msg: &Message) -> bool {
+    match filters.get(&EcuId) {
+        Some(FilterType::EcuId(ecu_id)) if ecu_id == msg.storage_header.ecu_id() => true,
+        Some(FilterType::EcuId(_)) => false,
+        _ => true,
+    }
+}
+
+fn filter_app_id(filters: &HashMap<FilterId, FilterType>, msg: &Message) -> bool {
+    match &msg.extended_header {
+        Some(extended_header) => {
+            match filters.get(&AppId) {
+                Some(FilterType::AppId(app_id)) if app_id == extended_header.app_id() => true,
+                Some(FilterType::AppId(_)) => false,
+                _ => true,
+            }
+        },
+        _ => true,
+    }
+}
+
+fn filter_context_id(filters: &HashMap<FilterId, FilterType>, msg: &Message) -> bool {
+    match &msg.extended_header {
+        Some(extended_header) => {
+            match filters.get(&ContextId) {
+                Some(FilterType::ContextId(app_id)) if app_id == extended_header.context_id() => true,
+                Some(FilterType::ContextId(_)) => false,
+                _ => true,
+            }
+        },
+        _ => true,
+    }
+}
+
+fn filter_patterns(filters: &HashMap<FilterId, FilterType>, msg: &Message) -> bool {
+    match filters.get(&FilterId::Patterns) {
+        Some(FilterType::Patterns(patterns)) => {
+            for val in &msg.payload {
+                match val {
+                    Value::String(string) => {
+                        if patterns.is_match(string) {
+                            return true
+                        } else {
+                            continue
+                        }
+                    },
+                    _ => continue,
+                }
+            }
+            false
+        },
+        _ => true,
     }
 }

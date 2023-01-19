@@ -11,3 +11,4 @@ name = "kraken"
 [dependencies]
 memmap = "0.7.0"
 paste = "*"
+regex = "1.7.0"
