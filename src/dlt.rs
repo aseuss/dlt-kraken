@@ -1,14 +1,15 @@
-use std::collections::{HashMap};
 use std::fs::File;
+use std::path::PathBuf;
+use std::fmt::Write;
 use memmap::MmapOptions;
-use regex::RegexSet;
-use crate::dlt::filter::{Filter, FilterId, FilterType};
+use crate::dlt::filter::{Filter};
 use crate::dlt::headers::{ExtendedHeader, read_extended_header, read_standard_header, read_storage_header, StandardHeader, StorageHeader};
 use crate::dlt::payload::{Payload, Value};
+use crate::{Output, OutputField, OutputType};
 
 mod headers;
 mod payload;
-mod filter;
+pub mod filter;
 
 pub struct TraceData<'d> {
     data : &'d [u8],
@@ -118,28 +119,80 @@ pub struct Message<'d> {
     payload: Vec<Value<'d>>,
 }
 
-pub fn run_dlt() {
-    let path = "./testfile_extended.dlt";
+pub fn run_dlt(file_path: &PathBuf, filters: &Filter, output: &Option<Output>) {
+    println!("{file_path:?}");
 
-    let file= File::open(path).unwrap();
+    let file= File::open(file_path).unwrap();
     let mmap = unsafe { MmapOptions::new().map(&file).unwrap() };
-
-    let patterns = RegexSet::new(&["short", "long"]).unwrap();
-    let mut filters = Filter::new();
-    filters.add(FilterId::EcuId, FilterType::EcuId("ECU1".to_string()))
-        .add(FilterId::AppId, FilterType::AppId("APP1".to_string()))
-        .add(FilterId::ContextId, FilterType::ContextId("CON1".to_string()))
-        .add(FilterId::Patterns, FilterType::Patterns(patterns));
 
     let message = TraceData::new(&mmap, 0);
 
-    let filtered_messages: Vec<Message> = message.iter()
+    for msg in message.iter()
         .filter(|msg| filters.filter_ecu_id(msg))
         .filter(|msg| filters.filter_app_id(msg))
-        .filter(|msg| filters.filter_context_id(msg))
-        .filter(|msg| filters.filter_patterns(msg))
-        .collect();
-    for msg in &filtered_messages {
-        println!("{:?}", msg);
+        .filter(|msg| filters.filter_context_id(msg)) {
+        let captures = filters.find_patterns(&msg);
+            if captures.is_some() {
+                println!("cap {captures:?}");
+                println!("output: {output:?}");
+                let captures : Vec<_>= captures.iter().flatten().collect();
+                if let Some(out) = output {
+                    let delimiter = match out.output_type() {
+                        OutputType::Stdout(stdout) => stdout.delimiter,
+                        OutputType::Csv(csv) => csv.delimiter,
+                    };
+                    let mut out_string = String::new();
+
+                    for field in &out.fields {
+                        let default_str = "none";
+                        let result = match field {
+                            OutputField::Time => write!(&mut out_string, "T{delimiter}"),
+                            OutputField::Timestamp => write!(&mut out_string, "TS{delimiter}"),
+                            OutputField::App => write!(&mut out_string, "{}{delimiter}", msg.extended_header.as_ref().map_or_else(|| default_str, |header| header.app_id())),
+                            OutputField::Ctx => write!(&mut out_string, "{}{delimiter}", msg.extended_header.as_ref().map_or_else(|| default_str, |header| header.context_id())),
+                            OutputField::Ecu => write!(&mut out_string, "{}{delimiter}", msg.standard_header.ecu_id().as_ref().map_or_else(|| default_str, |value| value)),
+                            OutputField::Capture(name) => {
+                                let mut result = Ok(());
+                                for capture in &captures {
+
+                                    if let Some(capture) = capture.name(name).map(|captured| captured.as_str()) {
+                                        result = write!(&mut out_string, "{capture}{delimiter}");
+                                        if result.is_err() {
+                                            break;
+                                        }
+                                    }
+                                }
+                                result
+                            },
+                            OutputField::Payload => {
+                                let payload_iter = msg.payload.iter().filter(|data| match data { Value::String(_) => true, _ => false});
+                                let mut result = Ok(());
+
+                                for data in payload_iter {
+                                    let string = match data {
+                                        Value::String(string) => string,
+                                        _ => default_str,
+                                    };
+                                    result = write!(&mut out_string, "{}{delimiter}", string);
+                                    if result.is_err() {
+                                        break;
+                                    }
+                                }
+                                result
+                            },
+                        };
+                        match result {
+                            Ok(_) => (),
+                            Err(err) => {
+                                eprintln!("error on constructing output to stdout: {err}");
+                            },
+                        }
+                    }
+                    println!("formatted out: {}", out_string.trim_end_matches(delimiter));
+                }
+            } else {
+                // TODO: make this prettier...
+                println!("{msg:?}")
+            }
     }
 }

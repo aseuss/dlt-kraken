@@ -1,10 +1,38 @@
 use std::collections::HashMap;
 use std::time::Duration;
-use regex::RegexSet;
+use regex::{Captures, Regex, RegexSet};
 use crate::dlt::Message;
 use crate::dlt::payload::Value;
 
-#[derive(Eq, PartialEq, Hash)]
+#[derive(Debug)]
+pub struct Pattern {
+    regex_set: RegexSet,
+    regexes: Vec<Regex>,
+}
+
+impl Pattern {
+    pub fn from<I, S>(expressions: I) -> Pattern
+    where
+        S: AsRef<str>,
+        I: IntoIterator<Item = S> {
+        let regex_set = RegexSet::new(expressions).unwrap();
+        let regexes: Vec<_> = regex_set.patterns().iter().map(|pat| Regex::new(pat).unwrap()).collect();
+        Pattern { regex_set, regexes }
+    }
+
+    fn captures<'d>(& self, string: &'d str) -> Option<Vec<Captures<'d>>> {
+        let captures : Vec<_> = self.regex_set.matches(string).into_iter()
+            .map(|match_idx| &self.regexes[match_idx])
+            .filter_map(|regex| regex.captures(string)).collect();
+        if captures.is_empty() {
+            None
+        } else {
+            Some(captures)
+        }
+    }
+}
+
+#[derive(Debug, Eq, PartialEq, Hash)]
 pub enum FilterId {
     EcuId,
     ContextId,
@@ -13,14 +41,16 @@ pub enum FilterId {
     Patterns,
 }
 
+#[derive(Debug)]
 pub enum FilterType {
     EcuId(String),
     ContextId(String),
     AppId(String),
     Time(Duration, Duration),
-    Patterns(RegexSet),
+    Patterns(Pattern),
 }
 
+#[derive(Debug)]
 pub struct Filter {
     filters: HashMap<FilterId, FilterType>,
 }
@@ -69,14 +99,17 @@ impl Filter {
         }
     }
 
-    pub fn filter_patterns(&self, msg: &Message) -> bool {
+    // TODO: does this belong here? Not really a filter...
+    pub fn find_patterns<'d>(&self, msg: &'d Message) -> Option<Vec<Captures<'d>>> {
         match self.filters.get(&FilterId::Patterns) {
             Some(FilterType::Patterns(patterns)) => {
                 for val in &msg.payload {
                     match val {
                         Value::String(string) => {
-                            if patterns.is_match(string) {
-                                return true
+                            let capture_matches = patterns.captures(string);
+
+                            if capture_matches.is_some() {
+                                return capture_matches
                             } else {
                                 continue
                             }
@@ -84,9 +117,9 @@ impl Filter {
                         _ => continue,
                     }
                 }
-                false
+                Some(vec![])
             },
-            _ => true,
+            _ => None,
         }
     }
 }
