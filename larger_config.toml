@@ -1,0 +1,39 @@
+[[filters]]
+name = 'Hello world'
+ecu_id = 'ECU1'
+app_id = 'APP1'
+context_id = 'CON1'
+#timestamp =
+patterns = [
+    'short',
+    'long',
+]
+
+[filters.output.csv]
+file_path = 'filename.csv'
+format = 'timestamp,'
+
+[filters.output.stdout]
+enabled = true
+delimiter = ','
+format = 'bla'
+
+[[filters]]
+name = 'foobar'
+ecu_id = 'ECU1'
+app_id = 'APP1'
+context_id = 'CON1'
+#timestamp =
+patterns = [
+    'short',
+    'long',
+]
+
+[filters.output.csv]
+file_path = 'filename2.csv'
+format = 'timestamp,ecu'
+
+[filters.output.stdout]
+enabled = true
+delimiter = ','
+format = 'blub'
