@@ -250,6 +250,10 @@ impl StandardHeader {
     pub fn len(&self) -> usize {
         self.length
     }
+
+    pub fn ecu_id(&self) -> &Option<String> {
+        &self.ecu_id
+    }
 }
 
 impl Display for StandardHeader {
