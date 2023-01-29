@@ -1,8 +1,10 @@
+use std::fmt::Error;
 use std::path::PathBuf;
 use std::process;
 use regex::{Regex};
 use crate::cli::Cli;
 use clap::Parser;
+use crate::config::Filter;
 use crate::dlt::filter::{FilterId, FilterType, Pattern};
 
 pub mod dlt;
@@ -72,6 +74,59 @@ impl Output {
     pub fn fields(&self) -> &Vec<OutputField> {
         &self.fields
     }
+
+    fn validate_captures(filter : &Filter, fields: &Vec<OutputField>) -> Result<(), String> {
+        let field_verifier = fields.iter().filter(|field| match field {
+            OutputField::Capture(_) => true,
+            _ => false,
+        });
+        let capture_names = filter.patterns().as_ref().map_or_else(|| None, |patterns| Pattern::capture_names(patterns));
+        // validate output fields for captures
+        for field in field_verifier {
+            match field {
+                OutputField::Capture(name) => {
+                    if let Some(capture_names) = &capture_names {
+                        if capture_names.iter().find(|capture_name| *capture_name == name) == None {
+                            return Err::<(),String>(format!("no capture defined for stdout field '{name}' in filter '{}'", filter.name()));
+                        }
+                    } else {
+                        return Err::<(),String>(format!("capture '{name}' from stdout not found: no captures defined in filter '{}'", filter.name()));
+                    }
+                },
+                _ => unreachable!("other output fields should have been filtered!"),
+            }
+        }
+        Ok(())
+    }
+
+    pub fn from_filter(filter: &Filter) -> Option<Output> {
+        match filter.output() {
+            Some(output) => {
+                if let Some(stdout) = output.stdout() {
+                    if stdout.is_enabled() {
+                        let fields : Vec<_>= stdout.format_string().split(stdout.delimiter()).collect();
+                        let fields : Vec<_> = fields.iter().filter_map(|field_name| OutputField::from(field_name)).collect();
+
+                        match Output::validate_captures(filter, &fields) {
+                            Ok(_) => Some(Output {
+                                out_type: OutputType::Stdout(Stdout { delimiter: stdout.delimiter() }),
+                                fields: fields,
+                            }),
+                            Err(err) => {
+                                eprintln!("{err}");
+                                process::exit(1);
+                            }
+                        }
+                    } else {
+                        None
+                    }
+                } else {
+                    None
+                }
+            }
+            _ => None,
+        }
+    }
 }
 
 pub fn run() {
@@ -132,45 +187,7 @@ pub fn run() {
                     _ => ()
                 }
 
-                match cfg_filter.output() {
-                    Some(cfg_output) => {
-                        if let Some(stdout) = cfg_output.stdout() {
-                            if stdout.is_enabled() {
-                                let fields : Vec<_>= stdout.format_string().split(stdout.delimiter()).collect();
-                                let fields : Vec<_> = fields.iter().filter_map(|field_name| OutputField::from(field_name)).collect();
-
-                                let field_verifier = fields.iter().filter(|field| match field {
-                                    OutputField::Capture(_) => true,
-                                    _ => false,
-                                });
-                                // validate output fields for captures
-                                for field in field_verifier {
-                                    match field {
-                                        OutputField::Capture(name) => {
-                                            if let Some(capture_names) = &capture_names {
-                                                if capture_names.iter().find(|capture_name| *capture_name == name) == None {
-                                                    eprintln!("no capture defined for stdout field '{name}' in filter '{}'", cfg_filter.name());
-                                                    process::exit(1);
-                                                }
-                                            } else {
-                                                eprintln!("capture '{name}' from stdout not found: no captures defined in filter '{}'", cfg_filter.name());
-                                                process::exit(1);
-                                            }
-                                        },
-                                        _ => unreachable!("other output fields should have been filtered!"),
-                                    }
-                                }
-
-                                output = Some(Output {
-                                    out_type: OutputType::Stdout(Stdout { delimiter: stdout.delimiter() }),
-                                    fields: fields,
-                                });
-                            }
-                        }
-
-                    },
-                    _ => (),
-                }
+                output = Output::from_filter(&cfg_filter);
             }
         }
         println!("config: {config:?}");

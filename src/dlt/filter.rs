@@ -20,6 +20,26 @@ impl Pattern {
         Pattern { regex_set, regexes }
     }
 
+    pub fn capture_names(patterns: &Vec<String>) -> Option<Vec<String>> {
+        let regex = Regex::new("<(?P<name>[a-z]+)>").unwrap();
+        let mut names: Vec<String> = vec![];
+
+        for pattern in patterns {
+            let captures : Vec<_>= regex.captures_iter(pattern).collect();
+            for capture in captures {
+                if let Some(name) = capture.name("name") {
+                    names.push(name.as_str().to_string());
+                }
+            }
+        }
+
+        if names.is_empty() {
+            None
+        } else {
+            Some(names)
+        }
+    }
+
     fn captures<'d>(& self, string: &'d str) -> Option<Vec<Captures<'d>>> {
         let captures : Vec<_> = self.regex_set.matches(string).into_iter()
             .map(|match_idx| &self.regexes[match_idx])
