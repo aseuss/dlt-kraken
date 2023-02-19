@@ -1,0 +1,26 @@
+#[something]
+
+[[filters]]
+  name = "some name"
+  ecu_id = 'ECU1'
+  app_id = 'APP1'
+  context_id = 'CON1'
+  #timestamp =
+  patterns = [
+      'short',
+  #    'long',
+      'is a (?P<val>[a-z]+) ',
+      '(?P<age>[a-z]{3})\.\.\.$',
+      'anything',
+  ]
+
+[filters.output]
+  # csv files could either be individual to one pattern or gather multiple patterns
+  csv.file_path = 'filename.csv'
+  csv.format = 'timestamp,msg'
+  csv.delimiter = ','
+
+  # stdout is rather a catch all, everything that matches
+  stdout.enabled = true
+  stdout.delimiter = ':'
+  stdout.format = 'ecu:time:timestamp:ecu:app:ctx:<val>:<age>'
